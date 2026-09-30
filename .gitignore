@@ -1,0 +1,48 @@
+# ---- Secrets / env (never commit) ----
+.env
+.env.*
+!.env.example
+*.env.json
+mobile/env.json
+admin/.env.local
+admin/.env*.local
+service-account*.json
+*.pem
+*.key
+
+# ---- Flutter / Dart ----
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/.pub-cache/
+mobile/.pub/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/upload-keystore.jks
+mobile/android/key.properties
+mobile/coverage/
+*.iml
+
+# ---- Node / Next.js ----
+node_modules/
+admin/.next/
+admin/out/
+admin/coverage/
+admin/next-env.d.ts
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- Misc ----
+*.log
+dist/
+tmp/
