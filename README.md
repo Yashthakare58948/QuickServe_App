@@ -40,14 +40,27 @@ Security).
 
 ### 1. Backend (Supabase)
 
-1. Create a project at [supabase.com](https://supabase.com) (or use an existing one).
-2. Open **SQL Editor** and run, **in order**:
-   - `supabase/migrations/0001_schema.sql`
-   - `supabase/migrations/0002_rls_policies.sql`
-   - `supabase/migrations/0003_functions.sql`
-   - `supabase/migrations/0004_seed_services.sql`
-3. Run `supabase/seed_demo_users.sql` **once** to create the demo accounts.
-4. Copy the **Project URL** and **anon key** from *Project Settings → API*.
+**Option A — Supabase CLI (used for this build):**
+
+```bash
+supabase login --token <access-token>
+supabase link --project-ref <project-ref>
+supabase db push                   # applies 0001 → 0004 in order
+```
+
+Then apply `supabase/seed_demo_users.sql` once (SQL editor, or any Postgres
+client) to create the demo accounts.
+
+**Option B — SQL editor:** create a project, then run, **in order**:
+
+1. `supabase/migrations/0001_schema.sql`
+2. `supabase/migrations/0002_rls_policies.sql`
+3. `supabase/migrations/0003_functions.sql`
+4. `supabase/migrations/0004_seed_services.sql`
+5. `supabase/seed_demo_users.sql` (once)
+
+Then copy the **Project URL** and **anon key** from *Project Settings → API*
+into `mobile/env.json` and `admin/.env.local`.
 
 > No secrets live in this repository. The anon key is public-by-design but is
 > still supplied through environment configuration, never hard-coded.
@@ -96,8 +109,9 @@ cd mobile && flutter test
 # Authorization integration test (needs env.json + two extra test accounts)
 flutter test test/authorization_test.dart --dart-define-from-file=env.json
 
-# Backend RBAC tests — paste supabase/tests/authorization_test.sql
-# into the Supabase SQL editor and run it (rolls back afterwards).
+# Backend RBAC tests (10 assertions) — run supabase/tests/authorization_test.sql
+# in the SQL editor, or against the database with any Postgres client.
+# Everything is rolled back afterwards.
 
 # Admin portal lint + build
 cd admin && npm run lint && npm run build
