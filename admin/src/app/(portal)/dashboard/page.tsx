@@ -9,7 +9,7 @@ import {
   type DashboardStats,
   type ServiceRequest,
 } from "@/lib/types";
-import { friendlyError, formatDateTime } from "@/lib/format";
+import { friendlyError, formatDateTime, rpcDenial } from "@/lib/format";
 
 const CARDS: Array<{ key: keyof DashboardStats; label: string; tone?: string }> = [
   { key: "total", label: "Total requests", tone: "text-zinc-900" },
@@ -33,6 +33,8 @@ export default function DashboardPage() {
     try {
       const { data, error: err } = await supabase.rpc("dashboard_stats");
       if (err) throw err;
+      const denial = rpcDenial(data);
+      if (denial) throw new Error(denial);
       setStats(data as DashboardStats);
       setError(null);
 

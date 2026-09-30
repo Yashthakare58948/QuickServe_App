@@ -39,6 +39,9 @@ class AppLogger {
     'DATABASE_ERROR',
   };
 
+  /// Events the DB accepts without a session (mirrors `log_event`).
+  static const preAuthEvents = {'LOGIN_FAILED', 'PASSWORD_RESET_REQUESTED'};
+
   static Map<String, dynamic> _redact(Map<String, dynamic>? data) {
     if (data == null) return const {};
     return data.map((key, value) {
@@ -70,15 +73,16 @@ class AppLogger {
     if (!persistedEvents.contains(eventType)) return;
 
     final client = Supabase.instance.client;
-    if (client.auth.currentSession == null) return;
+    final hasSession = client.auth.currentSession != null;
+    if (!hasSession && !preAuthEvents.contains(eventType)) return;
 
     try {
       await client.rpc(
         'log_event',
         params: {
           'p_event_type': eventType,
-          'p_entity_type': entityType,
-          'p_entity_id': entityId,
+          'p_entity_type': hasSession ? entityType : null,
+          'p_entity_id': hasSession ? entityId : null,
           'p_metadata': _redact(data),
         },
       );

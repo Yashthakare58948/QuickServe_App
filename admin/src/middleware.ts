@@ -64,6 +64,17 @@ export async function middleware(request: NextRequest) {
       .maybeSingle();
 
     if (profile?.role !== 'admin') {
+      // Best-effort: record the portal access attempt (never blocks sign-out).
+      await supabase
+        .rpc('log_event', {
+          p_event_type: 'AUTHORIZATION_FAILED',
+          p_entity_type: 'portal',
+          p_entity_id: pathname,
+          p_metadata: { role: profile?.role ?? 'unknown', path: pathname },
+        })
+        .then(({ error }) => {
+          if (error) console.warn('[auth] audit log failed', error.message);
+        });
       await supabase.auth.signOut();
       const url = request.nextUrl.clone();
       url.pathname = '/login';

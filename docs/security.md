@@ -61,19 +61,31 @@ Read for admins only; insert only through `log_event()` / internal functions.
 UPDATE/DELETE blocked by an append-only trigger.
 
 ### `anon`
-All privileges revoked — no session, no data.
+All table privileges revoked — no session, no data. The only application RPC
+it may execute is `log_event()`, and that accepts just the pre-auth events
+`LOGIN_FAILED` and `PASSWORD_RESET_REQUESTED`; every other event raises `401`,
+and all business RPCs (`create_request`, `assign_agent`, …) are revoked.
 
 ## Defense in depth (RPC layer)
 
 Even if a policy were misconfigured, every RPC re-validates:
 
 1. `auth.uid()` must exist (else `401`).
-2. `current_user_role()` must permit the action — else the call is denied
-   **and** an `AUTHORIZATION_FAILED` audit row is written.
+2. `current_user_role()` must permit the action — otherwise the RPC **returns**
+   `{"denied": true, "message": …}` *and* writes an `AUTHORIZATION_FAILED` audit
+   row. Denials are *returned*, not `RAISE`d: an exception would roll back the
+   whole PostgREST transaction and take the audit row with it. Validation and
+   state-machine errors still `RAISE` (nothing to audit there), and direct table
+   writes are still blocked by RLS/guard triggers with `42501`.
 3. Input validation (lengths, future date, active service, agent role).
 4. State-machine validation via `is_valid_transition()`; terminal states are
    frozen.
 5. History + audit appended in the same transaction.
+
+Both clients unwrap the denial object (`RequestRepository._unwrap` /
+`rpcDenial()`), turn the `message` into a normal user-facing error and never
+report success on a denied call. Internal helpers (`deny`, `record_transition`,
+guard triggers) have `EXECUTE` revoked from clients.
 
 Helper functions (`current_user_role`, `is_admin`) are `SECURITY DEFINER` with
 a pinned `search_path` to avoid policy recursion, and `EXECUTE` is revoked from
@@ -101,9 +113,12 @@ a pinned `search_path` to avoid policy recursion, and `EXECUTE` is revoked from
 | `DATABASE_ERROR` | surfaced client failures |
 
 `event_type` is whitelisted inside `log_event()` — clients cannot write
-arbitrary rows. Metadata is size- and content-limited by convention:
-**passwords, tokens, API keys and emails are never logged**, and the logger
-redacts sensitive keys before printing to the console.
+arbitrary rows. `LOGIN_FAILED` and `PASSWORD_RESET_REQUESTED` are additionally
+allowed for `anon`, so a failed sign-in on either client (or a non-admin
+hitting the portal middleware) is still recorded without a session. Metadata is
+size- and content-limited by convention: **passwords, tokens, API keys and
+emails are never logged**, and the logger redacts sensitive keys before
+printing to the console.
 
 ## Secrets & configuration
 
@@ -116,8 +131,9 @@ redacts sensitive keys before printing to the console.
 
 ## Verifying
 
-- `supabase/tests/authorization_test.sql` — 8 backend assertions (cross-customer
-  SELECT/UPDATE/RPC denials, audit write, admin-only stats, agent visibility),
-  rolled back afterwards.
+- `supabase/tests/authorization_test.sql` — 10 backend assertions (cross-customer
+  SELECT/UPDATE, RPC denial objects for `cancel_request`/`dashboard_stats`/
+  `admin_set_role`, `AUTHORIZATION_FAILED` audit rows, blocked self-promotion,
+  admin-only stats, agent visibility), rolled back afterwards.
 - `mobile/test/authorization_test.dart` — live integration test: customer B
   reads/updates/cancels customer A's request → all denied by the backend.

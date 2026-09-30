@@ -31,6 +31,20 @@ export function initials(name: string | null | undefined): string {
 }
 
 /**
+ * Server-side authorization failures are returned by the RPCs as
+ * `{denied: true, message}` (the row is audited server-side). Returns the
+ * denial message, or null when `data` is a normal success payload.
+ */
+export function rpcDenial(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) return null;
+  const payload = data as { denied?: unknown; message?: unknown };
+  if (payload.denied !== true) return null;
+  return typeof payload.message === "string" && payload.message
+    ? payload.message
+    : "You are not authorized to perform this action.";
+}
+
+/**
  * Formats a PostgREST/RPC error for display. Never leaks SQL or keys.
  */
 export function friendlyError(error: unknown): string {

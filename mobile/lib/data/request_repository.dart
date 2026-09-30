@@ -65,6 +65,22 @@ class RequestRepository {
     return rows.map(StatusHistoryEntry.fromJson).toList();
   }
 
+  /// RPCs return `{"denied": true, "message": ...}` when the server-side
+  /// authorization check fails (the row is already audited server-side).
+  /// Anything else is the success payload (the RPC never raises for auth).
+  static Map<String, dynamic> _unwrap(Object? result) {
+    final row = result is Map<String, dynamic>
+        ? result
+        : (result as Map).cast<String, dynamic>();
+    if (row['denied'] == true) {
+      throw AppException(
+        (row['message'] as String?) ?? 'You are not allowed to do that.',
+        kind: AppErrorKind.forbidden,
+      );
+    }
+    return row;
+  }
+
   Future<ServiceRequest> create({
     required String serviceId,
     required String description,
@@ -72,13 +88,13 @@ class RequestRepository {
     required String address,
     required RequestPriority priority,
   }) async {
-    final row = await _client.rpc('create_request', params: {
+    final row = _unwrap(await _client.rpc('create_request', params: {
       'p_service_id': serviceId,
       'p_description': description.trim(),
       'p_preferred_at': preferredAt.toUtc().toIso8601String(),
       'p_address': address.trim(),
       'p_priority': priority.raw,
-    }) as Map<String, dynamic>;
+    }));
     await AppLogger.event('REQUEST_CREATED',
         entityType: 'service_request', entityId: row['id'] as String?);
     return ServiceRequest.fromJson(row);
@@ -89,11 +105,11 @@ class RequestRepository {
     required RequestStatus to,
     String? note,
   }) async {
-    final row = await _client.rpc('update_request_status', params: {
+    final row = _unwrap(await _client.rpc('update_request_status', params: {
       'p_request_id': requestId,
       'p_new_status': to.raw,
       'p_note': note,
-    }) as Map<String, dynamic>;
+    }));
     await AppLogger.event('REQUEST_UPDATED',
         entityType: 'service_request',
         entityId: requestId,
@@ -102,20 +118,20 @@ class RequestRepository {
   }
 
   Future<ServiceRequest> cancel({required String requestId, String? reason}) async {
-    final row = await _client.rpc('cancel_request', params: {
+    final row = _unwrap(await _client.rpc('cancel_request', params: {
       'p_request_id': requestId,
       'p_reason': reason,
-    }) as Map<String, dynamic>;
+    }));
     await AppLogger.event('REQUEST_CANCELLED',
         entityType: 'service_request', entityId: requestId);
     return ServiceRequest.fromJson(row);
   }
 
   Future<void> addNote({required String requestId, required String note}) async {
-    await _client.rpc('add_note', params: {
+    _unwrap(await _client.rpc('add_note', params: {
       'p_request_id': requestId,
       'p_note': note.trim(),
-    });
+    }));
     await AppLogger.event('REQUEST_UPDATED',
         entityType: 'service_request',
         entityId: requestId,

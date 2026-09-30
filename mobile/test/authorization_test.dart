@@ -110,22 +110,20 @@ void main() {
               reason: 'RLS must block B updating A\'s request');
 
           // 4. B calling cancel_request on A's request is refused by the
-          //    SECURITY DEFINER function (42501), not by the client.
-          Object? rpcError;
-          try {
-            await clientB.rpc('cancel_request', params: {
-              'p_request_id': requestId,
-              'p_reason': 'not mine',
-            });
-          } catch (e) {
-            rpcError = e;
-          }
-          expect(rpcError, isNotNull,
+          //    SECURITY DEFINER function. The RPC returns
+          //    {"denied": true, "message": ...} instead of raising — a
+          //    RAISE would roll back the AUTHORIZATION_FAILED audit row.
+          final cancelDenied =
+              await clientB.rpc('cancel_request', params: {
+            'p_request_id': requestId,
+            'p_reason': 'not mine',
+          }) as Map<String, dynamic>;
+          expect(cancelDenied['denied'], isTrue,
               reason: 'cancel_request must be denied for B');
-          expect(rpcError.toString(), contains('belong to you'));
+          expect(cancelDenied['message'], contains('belong to you'));
 
           // 5. The denial is audited server-side.
-          //    (audit_logs is admin-only; A's read of it must be empty.)
+          //    (audit_logs is admin-only; B's read of it must be empty.)
           final auditAsB = await clientB
               .from('audit_logs')
               .select('id')
@@ -133,14 +131,10 @@ void main() {
           expect(auditAsB, isEmpty,
               reason: 'customers must not read the audit log');
 
-          // 6. dashboard_stats is admin-only.
-          Object? dashError;
-          try {
-            await clientB.rpc('dashboard_stats');
-          } catch (e) {
-            dashError = e;
-          }
-          expect(dashError, isNotNull,
+          // 6. dashboard_stats is admin-only (same denial contract).
+          final dashDenied =
+              await clientB.rpc('dashboard_stats') as Map<String, dynamic>;
+          expect(dashDenied['denied'], isTrue,
               reason: 'dashboard_stats must be denied for customers');
         } finally {
           await clientA.auth.signOut();

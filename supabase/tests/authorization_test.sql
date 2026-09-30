@@ -4,11 +4,19 @@
 --
 -- Verifies, at the database layer:
 --   1. Customer B cannot SELECT customer A's request
---   2. Customer B cannot UPDATE customer A's request
---   3. cancel_request() by B on A's request is denied (42501)
---      and an AUTHORIZATION_FAILED audit row is written
---   4. dashboard_stats() is denied for non-admins
---   5. A customer cannot INSERT a request on someone else's behalf
+--   2. Customer B cannot SELECT A's status history
+--   3. Customer B cannot UPDATE customer A's request
+--   4. cancel_request() by B returns a denial object AND audits it
+--   5. dashboard_stats() returns a denial object for non-admins
+--   6. A customer cannot INSERT a request on someone else's behalf
+--   7. An agent cannot SELECT an unassigned request
+--   8. The owner can still SELECT her own request
+--   9. A customer cannot promote themselves to admin
+--  10. admin_set_role() by a customer returns a denial object AND audits it
+--
+-- Authorization denials RETURN {"denied": true, "message": ...}
+-- (see 0003_functions.sql — a RAISE would roll back the audit row),
+-- while direct table writes still RAISE 42501.
 --
 -- Everything runs inside a transaction that is rolled back, so the
 -- project data is left untouched.
@@ -91,64 +99,37 @@ begin
 end;
 $$;
 
--- ---------- TEST 4: cancel_request RPC denies B and logs AUTHORIZATION_FAILED ----------
+-- ---------- TEST 4: cancel_request() denies B with a denial object ----------
 do $$
 declare
-  v_denied boolean := false;
-  v_audit  integer;
+  v_result jsonb;
 begin
-  begin
-    perform public.cancel_request(
-      'aaaaaaaa-0000-0000-0000-000000000001',
-      'not mine'
-    );
-  exception
-    when insufficient_privilege or check_violation then
-      v_denied := true;
-    when others then
-      if sqlstate = '42501' then
-        v_denied := true;
-      else
-        raise;
-      end if;
-  end;
+  v_result := public.cancel_request(
+    'aaaaaaaa-0000-0000-0000-000000000001',
+    'not mine'
+  );
 
-  if not v_denied then
-    raise exception 'FAIL test4: cancel_request() was NOT denied for customer B';
+  if v_result is null
+     or coalesce((v_result ->> 'denied')::boolean, false) is not true then
+    raise exception 'FAIL test4: cancel_request() was NOT denied for customer B (got %)', v_result;
   end if;
 
-  select count(*) into v_audit
-    from public.audit_logs
-   where event_type = 'AUTHORIZATION_FAILED'
-     and actor_id = '22222222-2222-2222-2222-222222222222';
-
-  if v_audit = 0 then
-    raise exception 'FAIL test4: AUTHORIZATION_FAILED was not audited';
-  end if;
-
-  raise notice 'PASS test4: cancel_request denied for B and AUTHORIZATION_FAILED audited';
+  raise notice 'PASS test4: cancel_request denied for customer B';
 end;
 $$;
 
--- ---------- TEST 5: dashboard_stats() denied for non-admin ----------
+-- ---------- TEST 5: dashboard_stats() denied (denial object) for non-admin ----------
 do $$
 declare
-  v_denied boolean := false;
+  v_result jsonb;
 begin
-  begin
-    perform public.dashboard_stats();
-  exception
-    when others then
-      if sqlstate = '42501' then
-        v_denied := true;
-      else
-        raise;
-      end if;
-  end;
+  v_result := public.dashboard_stats();
 
-  if not v_denied then
-    raise exception 'FAIL test5: dashboard_stats() allowed for a customer';
+  if v_result is null
+     or coalesce((v_result ->> 'denied')::boolean, false) is not true then
+    raise exception 'FAIL test5: dashboard_stats() allowed for a customer (got %)', v_result;
   end if;
+
   raise notice 'PASS test5: dashboard_stats() denied for customer';
 end;
 $$;
@@ -204,12 +185,13 @@ begin
 end;
 $$;
 
--- ---------- TEST 8: customer A still sees her own request ----------
+-- ---------- TEST 8: customer A still sees her own request (untouched) ----------
 set "request.jwt.claims" to '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
 
 do $$
 declare
-  v_count integer;
+  v_count  integer;
+  v_status public.request_status;
 begin
   select count(*) into v_count
     from public.service_requests
@@ -218,12 +200,91 @@ begin
   if v_count <> 1 then
     raise exception 'FAIL test8: owner cannot see her own request (rows=%)', v_count;
   end if;
-  raise notice 'PASS test8: customer A can SELECT her own request';
+
+  -- the denied cancel_request in test 4 must not have mutated anything
+  select status into v_status
+    from public.service_requests
+   where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+  if v_status <> 'created' then
+    raise exception 'FAIL test8: request mutated by denied call (status=%)', v_status;
+  end if;
+
+  raise notice 'PASS test8: customer A can SELECT her own request and it is untouched';
+end;
+$$;
+
+-- ---------- TEST 9: a customer cannot promote themselves to admin ----------
+do $$
+begin
+  begin
+    update public.profiles
+       set role = 'admin'
+     where id = '11111111-1111-1111-1111-111111111111';
+    raise exception 'FAIL test9: customer self-promoted to admin';
+  exception
+    when others then
+      if sqlstate <> '42501' then
+        raise;
+      end if;
+  end;
+  raise notice 'PASS test9: self-promotion to admin is blocked (42501)';
+end;
+$$;
+
+-- ---------- TEST 10: admin_set_role() by a customer is denied ----------
+do $$
+declare
+  v_result jsonb;
+begin
+  v_result := public.admin_set_role('33333333-3333-3333-3333-333333333333', 'admin');
+
+  if v_result is null
+     or coalesce((v_result ->> 'denied')::boolean, false) is not true then
+    raise exception 'FAIL test10: admin_set_role() was NOT denied for a customer (got %)', v_result;
+  end if;
+
+  raise notice 'PASS test10: admin_set_role denied for customer';
+end;
+$$;
+
+-- ---------- owner-level audit assertions ----------
+-- audit_logs is admin-only under RLS, so the denials written while
+-- acting as a customer are asserted here with table-owner privileges.
+reset role;
+
+do $$
+declare
+  v_count integer;
+  v_role  public.user_role;
+begin
+  select count(*) into v_count
+    from public.audit_logs
+   where event_type = 'AUTHORIZATION_FAILED'
+     and actor_id = '22222222-2222-2222-2222-222222222222';
+  if v_count < 2 then
+    raise exception 'FAIL audit: expected cancel_request + dashboard_stats denials (got %)', v_count;
+  end if;
+
+  select count(*) into v_count
+    from public.audit_logs
+   where event_type = 'AUTHORIZATION_FAILED'
+     and actor_id = '11111111-1111-1111-1111-111111111111'
+     and entity_type = 'profile';
+  if v_count = 0 then
+    raise exception 'FAIL audit: admin_set_role denial was not audited';
+  end if;
+
+  select role into v_role from public.profiles
+   where id = '33333333-3333-3333-3333-333333333333';
+  if v_role is distinct from 'agent' then
+    raise exception 'FAIL test10: role changed by a denied call (role=%)', v_role;
+  end if;
+
+  raise notice 'PASS audit: AUTHORIZATION_FAILED rows persisted for every denial';
 end;
 $$;
 
 -- ---------- rollback: no test data persists ----------
-reset role;
 rollback;
 
 do $$

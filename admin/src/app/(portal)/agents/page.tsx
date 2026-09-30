@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { type Profile, type ServiceRequest, type Status } from "@/lib/types";
-import { formatDate, friendlyError, initials } from "@/lib/format";
+import { formatDate, friendlyError, initials, rpcDenial } from "@/lib/format";
 
 const OPEN: Status[] = ["created", "assigned", "accepted", "in_progress"];
 
@@ -50,13 +50,18 @@ export default function AgentsPage() {
     setNotice(null);
     setError(null);
     const supabase = createClient();
-    const { error: err } = await supabase.rpc("admin_set_role", {
+    const { data, error: err } = await supabase.rpc("admin_set_role", {
       p_user_id: profile.id,
       p_role: role,
     });
     setBusy(false);
     if (err) {
       setError(friendlyError(err));
+      return;
+    }
+    const denial = rpcDenial(data);
+    if (denial) {
+      setError(denial);
       return;
     }
     setNotice(`${profile.full_name} is now a ${role}`);

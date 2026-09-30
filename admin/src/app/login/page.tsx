@@ -30,6 +30,16 @@ function LoginForm() {
     });
     setBusy(false);
     if (err) {
+      // Best-effort pre-auth audit (anon may log LOGIN_FAILED only).
+      await supabase
+        .rpc("log_event", {
+          p_event_type: "LOGIN_FAILED",
+          p_entity_type: "portal",
+          p_metadata: { reason: err.message.split(".")[0] },
+        })
+        .then(({ error }) => {
+          if (error) console.warn("[auth] audit log failed", error.message);
+        });
       setError(friendlyError(err));
       return;
     }
@@ -49,7 +59,17 @@ function LoginForm() {
       email.trim(),
     );
     if (err) setError(friendlyError(err));
-    else setInfo("Password reset link sent — check your inbox.");
+    else {
+      await supabase
+        .rpc("log_event", {
+          p_event_type: "PASSWORD_RESET_REQUESTED",
+          p_entity_type: "portal",
+        })
+        .then(({ error }) => {
+          if (error) console.warn("[auth] audit log failed", error.message);
+        });
+      setInfo("Password reset link sent — check your inbox.");
+    }
   }
 
   return (

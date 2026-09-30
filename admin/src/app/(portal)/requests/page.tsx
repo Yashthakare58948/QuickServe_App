@@ -12,7 +12,7 @@ import {
   type ServiceRequest,
   type Status,
 } from "@/lib/types";
-import { friendlyError, formatDateTime } from "@/lib/format";
+import { friendlyError, formatDateTime, rpcDenial } from "@/lib/format";
 
 const STATUSES: Status[] = [
   "created",
@@ -110,13 +110,18 @@ export default function RequestsPage() {
     setNotice(null);
     setError(null);
     const supabase = createClient();
-    const { error: err } = await supabase.rpc("assign_agent", {
+    const { data, error: err } = await supabase.rpc("assign_agent", {
       p_request_id: selected.id,
       p_agent_id: agentId,
     });
     setBusy(false);
     if (err) {
       setError(friendlyError(err));
+      return;
+    }
+    const denial = rpcDenial(data);
+    if (denial) {
+      setError(denial);
       return;
     }
     setNotice(`Assigned to ${agents.find((a) => a.id === agentId)?.full_name ?? "agent"}`);
@@ -131,7 +136,7 @@ export default function RequestsPage() {
     setNotice(null);
     setError(null);
     const supabase = createClient();
-    const { error: err } = await supabase.rpc("update_request_status", {
+    const { data, error: err } = await supabase.rpc("update_request_status", {
       p_request_id: selected.id,
       p_new_status: to,
       p_note: null,
@@ -139,6 +144,11 @@ export default function RequestsPage() {
     setBusy(false);
     if (err) {
       setError(friendlyError(err));
+      return;
+    }
+    const denial = rpcDenial(data);
+    if (denial) {
+      setError(denial);
       return;
     }
     setNotice(`Status changed to ${STATUS_LABELS[to]}`);
