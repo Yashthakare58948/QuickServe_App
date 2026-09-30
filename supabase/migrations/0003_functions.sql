@@ -385,6 +385,56 @@ end;
 $$;
 
 -- ============================================================
+-- RPC: add_note  (customer own / assigned agent / admin)
+-- Appends a note to the status history without changing status.
+-- ============================================================
+create or replace function public.add_note(
+  p_request_id uuid,
+  p_note       text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_role public.user_role := public.current_user_role();
+  v_uid  uuid := auth.uid();
+  v_row  public.service_requests;
+begin
+  if v_uid is null then
+    raise exception 'Not authenticated' using errcode = '401';
+  end if;
+  if p_note is null or char_length(trim(p_note)) < 2 then
+    raise exception 'Note is too short' using errcode = '22023';
+  end if;
+
+  select * into v_row from public.service_requests where id = p_request_id for update;
+  if not found then
+    raise exception 'Request not found' using errcode = 'P0002';
+  end if;
+
+  if v_role = 'admin' then
+    null;
+  elsif v_role = 'agent' and v_row.agent_id = v_uid then
+    null;
+  elsif v_role = 'customer' and v_row.customer_id = v_uid then
+    null;
+  else
+    perform public.denied('add_note', 'service_request');
+    raise exception 'You are not allowed to comment on this request' using errcode = '42501';
+  end if;
+
+  insert into public.request_status_history (request_id, from_status, to_status, changed_by, note)
+  values (v_row.id, v_row.status, v_row.status, v_uid, trim(p_note));
+
+  insert into public.audit_logs (actor_id, actor_role, event_type, entity_type, entity_id, metadata)
+  values (v_uid, v_role, 'REQUEST_UPDATED', 'service_request', v_row.id::text,
+          jsonb_build_object('action', 'add_note'));
+end;
+$$;
+
+-- ============================================================
 -- RPC: admin dashboard stats  (Admin only)
 -- ============================================================
 create or replace function public.dashboard_stats()
@@ -473,6 +523,7 @@ revoke all on function public.cancel_request(uuid, text) from public, anon;
 revoke all on function public.dashboard_stats() from public, anon;
 revoke all on function public.admin_set_role(uuid, public.user_role) from public, anon;
 revoke all on function public.log_event(text, text, text, jsonb) from public, anon;
+revoke all on function public.add_note(uuid, text) from public, anon;
 revoke all on function public.record_transition(uuid, public.request_status, public.request_status, text, text) from public, anon;
 revoke all on function public.denied(text, text) from public, anon;
 
@@ -483,3 +534,4 @@ grant execute on function public.cancel_request(uuid, text) to authenticated;
 grant execute on function public.dashboard_stats() to authenticated;
 grant execute on function public.admin_set_role(uuid, public.user_role) to authenticated;
 grant execute on function public.log_event(text, text, text, jsonb) to authenticated;
+grant execute on function public.add_note(uuid, text) to authenticated;
