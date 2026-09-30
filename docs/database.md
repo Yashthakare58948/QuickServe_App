@@ -72,7 +72,8 @@ erDiagram
 | `is_active` | bool | soft-disable switch |
 
 Auto-created by the `on_auth_user_created` trigger on `auth.users` — signup can
-only ever produce a `customer`; roles are promoted by `admin_set_role()`.
+only ever produce a `customer`; roles are promoted by `admin_set_role()`, and
+admins may also provision a brand-new agent with `admin_create_agent()`.
 
 ### `services`
 `name` is unique; seeded with AC Servicing, Plumbing, Electrical, Cleaning.
@@ -109,6 +110,13 @@ A `BEFORE UPDATE OR DELETE` trigger raises on mutation — history is immutable.
 `actor_id`, `actor_role`, whitelisted `event_type`, `entity_type`,
 `entity_id`, `metadata jsonb`, `created_at`. Same append-only trigger.
 **Never stores passwords, tokens, API keys or emails.**
+
+The actor FKs are `on delete set null`, and an account with history can be
+removed: `prevent_mutation()` lets through only the UPDATE produced *inside*
+another trigger (`pg_trigger_depth() > 1`), i.e. the foreign key nulling out
+its own reference. The row survives — attributed to nobody, shown as
+"Anonymous" in the portal — while `update audit_logs set event_type = …` from
+any client still raises `42501`.
 
 ## Indexes
 

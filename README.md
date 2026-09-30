@@ -1,5 +1,7 @@
 # QuickServe — Service Request Management
 
+[![CI](https://github.com/Yashthakare58948/QuickServe_App/actions/workflows/ci.yml/badge.svg)](https://github.com/Yashthakare58948/QuickServe_App/actions/workflows/ci.yml)
+
 End-to-end service-request platform built for the **SWASIQ Intern Technical
 Assignment**. Customers create and track service requests from a Flutter mobile
 app, service agents manage assigned work, and administrators operate everything
@@ -45,7 +47,7 @@ Security).
 ```bash
 supabase login --token <access-token>
 supabase link --project-ref <project-ref>
-supabase db push                   # applies 0001 → 0004 in order
+supabase db push                   # applies 0001 → 0006 in order
 ```
 
 Then apply `supabase/seed_demo_users.sql` once (SQL editor, or any Postgres
@@ -57,7 +59,9 @@ client) to create the demo accounts.
 2. `supabase/migrations/0002_rls_policies.sql`
 3. `supabase/migrations/0003_functions.sql`
 4. `supabase/migrations/0004_seed_services.sql`
-5. `supabase/seed_demo_users.sql` (once)
+5. `supabase/migrations/0005_admin_create_agent.sql`
+6. `supabase/migrations/0006_append_only_fk_unlink.sql`
+7. `supabase/seed_demo_users.sql` (once)
 
 Then copy the **Project URL** and **anon key** from *Project Settings → API*
 into `mobile/env.json` and `admin/.env.local`.
@@ -100,6 +104,9 @@ Created by `supabase/seed_demo_users.sql` — all use password **`Demo@12345`**.
 | Agent   | agent@demo.dev     | –      | ✓          |
 | Admin   | admin@demo.dev     | ✓      | –          |
 
+The admin can add more agents in the portal (**Service agents → Add agent**) or
+promote an existing customer (**Customers → Promote to agent**).
+
 ## Testing
 
 ```bash
@@ -109,7 +116,7 @@ cd mobile && flutter test
 # Authorization integration test (needs env.json + two extra test accounts)
 flutter test test/authorization_test.dart --dart-define-from-file=env.json
 
-# Backend RBAC tests (10 assertions) — run supabase/tests/authorization_test.sql
+# Backend RBAC tests (13 assertions) — run supabase/tests/authorization_test.sql
 # in the SQL editor, or against the database with any Postgres client.
 # Everything is rolled back afterwards.
 
@@ -136,6 +143,8 @@ customer's request** (SELECT/UPDATE/RPC all denied, with an
       (+ `CANCELLED` where eligible), enforced server-side
 - [x] Admin portal: dashboard counters, search/filter/pagination, assign agent,
       status updates, customer/agent views, audit log
+- [x] Agent staffing: create new agent accounts and promote/demote users from
+      the portal
 - [x] Roles: customer, agent, admin — enforced by Postgres RLS + RPC checks
 - [x] Session persistence, password reset
 - [x] Audit trail (`LOGIN_SUCCESS`, `REQUEST_CREATED`, `REQUEST_ASSIGNED`,

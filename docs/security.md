@@ -12,7 +12,7 @@ convenience, not security.
 | Role | How obtained |
 |------|--------------|
 | `customer` | Default at signup (profile trigger) |
-| `agent` | Promoted by an admin via `admin_set_role()` |
+| `agent` | Created by an admin via `admin_create_agent()`, or promoted from `customer` via `admin_set_role()` |
 | `admin` | Promoted by an admin; cannot demote themselves |
 
 ## RBAC matrix
@@ -26,6 +26,7 @@ convenience, not security.
 | Cancel (eligible) | ✅ (own, `created`/`assigned`) | ❌ | ✅ |
 | Add note | ✅ (own) | ✅ (assigned) | ✅ |
 | Assign agent | ❌ | ❌ | ✅ |
+| Create agent account | ❌ | ❌ | ✅ |
 | Change user roles | ❌ | ❌ | ✅ |
 | View dashboard stats | ❌ | ❌ | ✅ |
 | View audit log | ❌ | ❌ | ✅ |
@@ -58,7 +59,10 @@ only `SECURITY DEFINER` functions/triggers can append.
 
 ### `audit_logs`
 Read for admins only; insert only through `log_event()` / internal functions.
-UPDATE/DELETE blocked by an append-only trigger.
+UPDATE/DELETE blocked by an append-only trigger — with one narrow exception:
+the FK's own `ON DELETE SET NULL` when an account is removed (it runs inside
+the foreign-key trigger, `pg_trigger_depth() > 1`). The audit row survives with
+`actor_id = null`; a direct `UPDATE` from any client still fails with `42501`.
 
 ### `anon`
 All table privileges revoked — no session, no data. The only application RPC
@@ -90,6 +94,22 @@ guard triggers) have `EXECUTE` revoked from clients.
 Helper functions (`current_user_role`, `is_admin`) are `SECURITY DEFINER` with
 a pinned `search_path` to avoid policy recursion, and `EXECUTE` is revoked from
 `anon`/`public`.
+
+### Account provisioning (`admin_create_agent`)
+
+The admin portal can create agent accounts without ever touching the
+service-role key: `admin_create_agent(email, password, full_name, phone?)` is a
+`SECURITY DEFINER` RPC that
+
+- refuses non-admins with the standard `{denied: true}` object + audit row,
+- validates email / 8+ char password / name, and rejects duplicate emails
+  (`23505`) before writing anything,
+- inserts the `auth.users` + `auth.identities` rows the same way the demo seed
+  does (verified in test 12 that the stored hash actually checks out), and
+- writes `ROLE_CHANGED` with `action: "create_agent"` — **never the password**.
+
+Because the account is created already confirmed, the agent can sign in
+immediately (there is no invitation email). Customers still self-register.
 
 ## Authentication
 
@@ -131,9 +151,11 @@ printing to the console.
 
 ## Verifying
 
-- `supabase/tests/authorization_test.sql` — 10 backend assertions (cross-customer
+- `supabase/tests/authorization_test.sql` — 13 backend assertions (cross-customer
   SELECT/UPDATE, RPC denial objects for `cancel_request`/`dashboard_stats`/
-  `admin_set_role`, `AUTHORIZATION_FAILED` audit rows, blocked self-promotion,
-  admin-only stats, agent visibility), rolled back afterwards.
+  `admin_set_role`/`admin_create_agent`, `AUTHORIZATION_FAILED` audit rows,
+  blocked self-promotion, admin-only stats, agent visibility, admin agent
+  provisioning incl. password verification and no-password-in-audit, account
+  deletion preserving the audit trail), rolled back afterwards.
 - `mobile/test/authorization_test.dart` — live integration test: customer B
   reads/updates/cancels customer A's request → all denied by the backend.

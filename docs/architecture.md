@@ -17,7 +17,7 @@ flowchart LR
     subgraph SB["Supabase"]
         AUTH["Auth<br/>email/password, sessions"]
         PG[("Postgres<br/>tables + RLS")]
-        RPC["SECURITY DEFINER RPCs<br/>create_request · assign_agent<br/>update_request_status · cancel_request<br/>dashboard_stats · admin_set_role · log_event"]
+        RPC["SECURITY DEFINER RPCs<br/>create_request · assign_agent<br/>update_request_status · cancel_request<br/>dashboard_stats · admin_set_role<br/>admin_create_agent · log_event"]
         AUD[(audit_logs)]
         HIST[(request_status_history)]
     end

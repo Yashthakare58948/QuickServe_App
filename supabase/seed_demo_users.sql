@@ -67,14 +67,33 @@ begin
        jsonb_build_object('sub', v_admin_id::text, 'email', 'admin@demo.dev', 'email_verified', true),
        'email', now(), now(), now());
 
-    -- ---------- roles (profiles rows are auto-created by trigger) ----------
-    update public.profiles set role = 'agent', full_name = 'Sneha Agent', phone = '9000000002'
+    -- ---------- display details (fresh signups only) ----------
+    update public.profiles set full_name = 'Sneha Agent', phone = '9000000002'
       where id = v_agent_id;
-    update public.profiles set role = 'admin', full_name = 'Ravi Admin',  phone = '9000000003'
+    update public.profiles set full_name = 'Ravi Admin',  phone = '9000000003'
       where id = v_admin_id;
     update public.profiles set full_name = 'Aarav Customer', phone = '9000000001'
       where id = v_customer_id;
   end if;
+
+  -- ---------- roles: re-asserted on EVERY run (see header) ----------
+  -- A re-run after someone demotes the demo agent from the portal puts the
+  -- documented demo roles back. Names/phones are deliberately left alone so
+  -- edits made in the app survive.
+  update public.profiles p
+     set role = 'agent'
+    from auth.users u
+   where u.id = p.id and lower(u.email) = 'agent@demo.dev';
+
+  update public.profiles p
+     set role = 'admin'
+    from auth.users u
+   where u.id = p.id and lower(u.email) = 'admin@demo.dev';
+
+  update public.profiles p
+     set role = 'customer'
+    from auth.users u
+   where u.id = p.id and lower(u.email) = 'customer@demo.dev';
 
   -- ---------- normalise token columns ----------
   -- Supabase Auth reads these columns into non-nullable Go strings.
